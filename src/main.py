@@ -125,8 +125,9 @@ async def lifespan(app: Starlette):
 
     log.info("startup_complete", port=settings.port)
 
-    # ---- yield (server runs here) ----
-    yield
+    # ---- Start FastMCP session manager (required for Streamable HTTP) ----
+    async with mcp_server.session_manager.run():
+        yield
 
     # Shutdown sequence
     log.info("shutdown_begin")

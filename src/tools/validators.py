@@ -46,8 +46,11 @@ def safe_path(path: str, base_dir: Path) -> Path:
 
 
 def relative_to_repo(absolute_path: Path, base_dir: Path) -> str:
-    """Convert an absolute path back to a repo-relative string."""
+    """Convert an absolute path back to a repo-relative string.
+
+    Always uses forward slashes for cross-platform compatibility.
+    """
     try:
-        return str(absolute_path.relative_to(base_dir.resolve()))
+        return str(absolute_path.relative_to(base_dir.resolve())).replace("\\", "/")
     except ValueError:
-        return str(absolute_path)
+        return str(absolute_path).replace("\\", "/")

@@ -1,0 +1,175 @@
+# ============================================================
+# GitHub MCP Server — TrueNAS Scale Custom App Definition
+# ============================================================
+# How to use:
+#   1. Push this project to a GitHub repo (e.g. your-user/github-mcp-server)
+#   2. In TrueNAS Scale UI: Apps → Discover Apps → Custom App
+#   3. Paste this YAML into the "App Configuration" YAML field
+#   4. Fill in all variables under "environment" with your real values
+#   5. Click Install
+#
+# TrueNAS Scale: SCALE-22.12 or later (Kubernetes via k3s)
+# ============================================================
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: github-mcp-server
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mcp-repo-pvc
+  namespace: github-mcp-server
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi         # Adjust to size of your target repository
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mcp-index-pvc
+  namespace: github-mcp-server
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi          # FAISS index (scales with repo size)
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mcp-secrets
+  namespace: github-mcp-server
+type: Opaque
+stringData:
+  # ---- FILL IN THESE VALUES ----
+  GITHUB_TOKEN: "ghp_your_github_personal_access_token"
+  JWT_SECRET_KEY: "generate-with-python-secrets-token-hex-32"
+  OAUTH_CLIENT_SECRET: "your_oauth_client_secret"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: github-mcp-server
+  namespace: github-mcp-server
+  labels:
+    app: github-mcp-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: github-mcp-server
+  template:
+    metadata:
+      labels:
+        app: github-mcp-server
+    spec:
+      containers:
+        - name: mcp-server
+          # Replace with your Docker Hub image after pushing:
+          #   docker build -t your-dockerhub-user/github-mcp-server:latest .
+          #   docker push your-dockerhub-user/github-mcp-server:latest
+          image: your-dockerhub-user/github-mcp-server:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+
+          env:
+            # ---- Public config (edit these) ----
+            - name: GITHUB_REPO_URL
+              value: "https://github.com/your-username/your-repo.git"
+            - name: GITHUB_BRANCH
+              value: "main"
+            - name: OAUTH_CLIENT_ID
+              value: "your-oauth-client-id"
+            - name: OAUTH_ISSUER_URL
+              value: "https://your-domain.cloudflare-tunnel.com"
+            - name: LOG_LEVEL
+              value: "INFO"
+            - name: PULL_INTERVAL
+              value: "300"
+            - name: PUSH_DEBOUNCE
+              value: "120"
+            - name: REPO_DIR
+              value: "/data/repo"
+            - name: INDEX_DIR
+              value: "/data/index"
+
+            # ---- Secrets (loaded from Kubernetes Secret) ----
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-secrets
+                  key: GITHUB_TOKEN
+            - name: JWT_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-secrets
+                  key: JWT_SECRET_KEY
+            - name: OAUTH_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: mcp-secrets
+                  key: OAUTH_CLIENT_SECRET
+
+          volumeMounts:
+            - name: repo-storage
+              mountPath: /data/repo
+            - name: index-storage
+              mountPath: /data/index
+
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 120    # Allow time for first git clone
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 60
+            periodSeconds: 15
+
+      volumes:
+        - name: repo-storage
+          persistentVolumeClaim:
+            claimName: mcp-repo-pvc
+        - name: index-storage
+          persistentVolumeClaim:
+            claimName: mcp-index-pvc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: github-mcp-server
+  namespace: github-mcp-server
+spec:
+  selector:
+    app: github-mcp-server
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+  type: ClusterIP

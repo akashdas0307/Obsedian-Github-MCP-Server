@@ -1,0 +1,61 @@
+# ============================================================
+# Cloudflare Tunnel Configuration — GitHub MCP Server
+# ============================================================
+#
+# Prerequisites:
+#   1. cloudflared installed on TrueNAS Scale (or in a container)
+#   2. Authenticated: cloudflared tunnel login
+#   3. Tunnel created: cloudflared tunnel create github-mcp-server
+#      → Copy the Tunnel ID shown into <YOUR_TUNNEL_ID> below
+#   4. DNS record added:
+#      cloudflared tunnel route dns github-mcp-server your-subdomain.your-domain.com
+#
+# Run tunnel:
+#   cloudflared tunnel --config /path/to/cloudflare-tunnel.yml run
+#
+# Or as a system service (TrueNAS):
+#   cloudflared service install
+# ============================================================
+
+tunnel: <YOUR_TUNNEL_ID>
+credentials-file: /root/.cloudflared/<YOUR_TUNNEL_ID>.json
+
+# Optional: log level (debug, info, warn, error)
+loglevel: info
+
+ingress:
+  # Route all traffic for your MCP server domain to the local server
+  - hostname: your-subdomain.your-domain.com
+    service: http://localhost:8000
+    originRequest:
+      # Pass real client IP to the server
+      noTLSVerify: false
+      connectTimeout: 30s
+      tlsTimeout: 30s
+      tcpKeepAlive: 30s
+      keepAliveConnections: 100
+      keepAliveTimeout: 90s
+      # Allow large request bodies (for file uploads)
+      httpHostHeader: ""
+
+  # Catch-all — return 404 for unknown hostnames
+  - service: http_status:404
+
+# ============================================================
+# Docker Compose alternative (run cloudflared as a container)
+# ============================================================
+# Add this service to deploy/docker-compose.yml if preferred:
+#
+# cloudflared:
+#   image: cloudflare/cloudflared:latest
+#   restart: unless-stopped
+#   command: tunnel --no-autoupdate run
+#   environment:
+#     TUNNEL_TOKEN: "your-tunnel-token-from-cloudflare-dashboard"
+#   depends_on:
+#     mcp-server:
+#       condition: service_healthy
+#
+# With TUNNEL_TOKEN (from Cloudflare Zero Trust dashboard → Tunnels → your tunnel → Configure):
+# No credentials file needed — the token authenticates automatically.
+# ============================================================

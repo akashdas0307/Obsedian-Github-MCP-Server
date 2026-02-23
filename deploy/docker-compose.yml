@@ -1,0 +1,64 @@
+# ============================================================
+# GitHub MCP Server — Docker Compose
+# ============================================================
+# Usage:
+#   1. Copy .env.example to .env and fill in all values
+#   2. docker compose up -d
+#   3. Verify: curl http://localhost:8000/health
+# ============================================================
+
+version: "3.9"
+
+services:
+  mcp-server:
+    build:
+      context: ..          # Repo root (where Dockerfile lives)
+      dockerfile: deploy/Dockerfile
+    container_name: github-mcp-server
+    restart: unless-stopped
+
+    ports:
+      - "8000:8000"        # Only expose locally; Cloudflare Tunnel handles external TLS
+
+    env_file:
+      - ../.env            # All secrets loaded from .env file
+
+    environment:
+      # Override storage paths to match volume mounts below
+      REPO_DIR: /data/repo
+      INDEX_DIR: /data/index
+
+    volumes:
+      # Git clone — persisted between restarts
+      - repo_data:/data/repo
+      # FAISS index + metadata — persisted between restarts
+      - index_data:/data/index
+
+    # Resource limits (adjust for your TrueNAS server specs)
+    deploy:
+      resources:
+        limits:
+          memory: 4G       # nomic model ~270MB + cross-encoder ~90MB + FAISS
+          cpus: "2.0"
+        reservations:
+          memory: 1G
+
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s   # Allow time for git clone + index build on first start
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+volumes:
+  repo_data:
+    driver: local
+  index_data:
+    driver: local
